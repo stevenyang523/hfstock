@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import requests
 import datetime
 import pandas as pd  # 需要 pip install pandas openpyxl
+from typing import Optional, Tuple
 
 # --------- 样式设置（INS风格简约） ---------
 BG_COLOR = "#f8f8f8"
@@ -113,12 +114,35 @@ def get_stock_info(query):
     return {
         "name": name,
         "code": code,
+        "secid": secid,
         "now_price": now_price_str,
         "closed": closed,
         "pct_today": pct_today_str,
         "yesterday_close": prev_close,
-        "prev_pct": f"{prev_pct:+.2f}%" if isinstance(prev_pct, float) else prev_pct
+        "prev_pct": f"{prev_pct:+.2f}%" if isinstance(prev_pct, float) else prev_pct,
+        "prev_pct_value": prev_pct,
+        "today_close_value": today_close,
+        "today_pct_value": today_pct
     }
+
+
+def fetch_realtime_info(secid: str) -> Tuple[Optional[float], Optional[float]]:
+    """Return latest price and percent change for the given secid."""
+    try:
+        url = (
+            f"https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f170"
+        )
+        r = requests.get(url, timeout=5)
+        data = r.json().get("data", {})
+        price = data.get("f43")
+        pct = data.get("f170")
+        if price is not None:
+            price = float(price)
+        if pct is not None:
+            pct = float(pct)
+        return price, pct
+    except Exception:
+        return None, None
 
 class StockApp:
     def __init__(self, root):
@@ -169,7 +193,8 @@ class StockApp:
         # 结果内容
         self.result_labels = {}
         for i, key in enumerate([
-            "股票名称", "股票代码", "当日收盘价", "当日涨跌幅", "前一交易日收盘价", "前一交易日涨跌幅"
+            "股票名称", "股票代码", "实时价格", "实时涨跌幅",
+            "当日收盘价", "当日涨跌幅", "前一交易日收盘价", "前一交易日涨跌幅"
         ]):
             lbl = tk.Label(self.result_frame, text=f"{key}：", font=FONT_RESULT, anchor="w", bg=BG_COLOR)
             lbl.grid(row=i, column=0, sticky="w", pady=5)
@@ -211,8 +236,16 @@ class StockApp:
         if not q:
             messagebox.showwarning("提示", "请输入股票名称或代码")
             return
-        self.show_result({"股票名称": "查询中...", "股票代码": "", "当日收盘价": "", "当日涨跌幅": "",
-                          "前一交易日收盘价": "", "前一交易日涨跌幅": ""})
+        self.show_result({
+            "股票名称": "查询中...",
+            "股票代码": "",
+            "实时价格": "",
+            "实时涨跌幅": "",
+            "当日收盘价": "",
+            "当日涨跌幅": "",
+            "前一交易日收盘价": "",
+            "前一交易日涨跌幅": ""
+        })
         self.root.after(100, lambda: self._do_query(q))
 
     def _do_query(self, q):
@@ -226,6 +259,8 @@ class StockApp:
         result = {
             "股票名称": info["name"],
             "股票代码": info["code"],
+            "实时价格": "-",
+            "实时涨跌幅": "-",
             "当日收盘价": info["now_price"],
             "当日涨跌幅": info["pct_today"],
             "前一交易日收盘价": f"{info['yesterday_close']:.2f}" if isinstance(info['yesterday_close'], float) else info['yesterday_close'],
@@ -233,11 +268,31 @@ class StockApp:
         }
         self.show_result(result)
 
-        # 保存到历史
-        display_str = f"{result['股票名称']}({result['股票代码']}) | 收盘:{result['当日收盘价']} | 涨跌幅:{result['当日涨跌幅']} | 昨收:{result['前一交易日收盘价']} | 昨涨跌幅:{result['前一交易日涨跌幅']}"
-        self.history.append(result)
-        self.history_combo['values'] = [f"{i+1}. {self.history[i]['股票名称']}({self.history[i]['股票代码']})" for i in range(len(self.history))]
-        self.history_combo.current(len(self.history)-1)
+        # 启动实时刷新
+        self.start_realtime_refresh(info)
+
+        # 保存到历史，若存在相同股票则覆盖
+        display_str = (
+            f"{result['股票名称']}({result['股票代码']}) | 收盘:{result['当日收盘价']} | "
+            f"涨跌幅:{result['当日涨跌幅']} | 昨收:{result['前一交易日收盘价']} | "
+            f"昨涨跌幅:{result['前一交易日涨跌幅']}"
+        )
+        replace_index = None
+        for idx, item in enumerate(self.history):
+            if item.get('股票代码') == result['股票代码']:
+                replace_index = idx
+                break
+        if replace_index is not None:
+            self.history[replace_index] = result
+        else:
+            self.history.append(result)
+            replace_index = len(self.history) - 1
+
+        self.history_combo['values'] = [
+            f"{i+1}. {self.history[i]['股票名称']}({self.history[i]['股票代码']})"
+            for i in range(len(self.history))
+        ]
+        self.history_combo.current(replace_index)
         self.history_var.set(display_str)
 
         if "notice" in info:
@@ -247,6 +302,38 @@ class StockApp:
         for k, v in data.items():
             if k in self.result_labels:
                 self.result_labels[k].config(text=v)
+
+    def start_realtime_refresh(self, info):
+        """Begin 5-second updates for realtime price."""
+        self.current_secid = info.get("secid")
+        self.prev_close_value = info.get("yesterday_close")
+        self.prev_pct_value = info.get("prev_pct_value")
+        self.today_close_value = info.get("today_close_value")
+        self.today_pct_value = info.get("today_pct_value")
+        if hasattr(self, "_rt_job") and self._rt_job:
+            self.root.after_cancel(self._rt_job)
+        self.update_realtime()
+
+    def update_realtime(self):
+        if not getattr(self, "current_secid", None):
+            return
+        now_dt = datetime.datetime.now().time()
+        start = datetime.time(9, 30)
+        end = datetime.time(15, 0)
+        if now_dt < start:
+            price = self.prev_close_value
+            pct = self.prev_pct_value
+        elif now_dt >= end:
+            price = self.today_close_value
+            pct = self.today_pct_value
+        else:
+            price, pct = fetch_realtime_info(self.current_secid)
+            if price is None:
+                price = "-"
+        price_str = f"{price:.2f}" if isinstance(price, float) else price
+        pct_str = f"{pct:+.2f}%" if isinstance(pct, float) else (pct or "-")
+        self.show_result({"实时价格": price_str, "实时涨跌幅": pct_str})
+        self._rt_job = self.root.after(5000, self.update_realtime)
 
     def export_excel(self):
         if not self.history:
