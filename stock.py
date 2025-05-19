@@ -24,8 +24,11 @@ def get_stock_info(query):
     name = None
     market = None
     try:
-        url = f"https://searchapi.eastmoney.com/api/suggest/get?input={query}&type=14"
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(
+            "https://searchapi.eastmoney.com/api/suggest/get",
+            params={"input": query, "type": "14"},
+            timeout=5,
+        )
         data = resp.json()
         data_table = data.get("QuotationCodeTable") or data.get("Data") or {}
         stock_list = data_table.get("Data") or data_table.get("data") or []
@@ -61,8 +64,6 @@ def get_stock_info(query):
         )
         resp2 = requests.get(url2, timeout=5)
         j = resp2.json()
-        print("DEBUG: url2 =", url2)
-        print("DEBUG: kline接口返回：", j)
         klines = j.get("data", {}).get("klines")
         # 用K线接口返回的name字段补全股票名称
         if not name:
