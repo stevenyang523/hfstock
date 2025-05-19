@@ -61,8 +61,6 @@ def get_stock_info(query):
         )
         resp2 = requests.get(url2, timeout=5)
         j = resp2.json()
-        print("DEBUG: url2 =", url2)
-        print("DEBUG: kline接口返回：", j)
         klines = j.get("data", {}).get("klines")
         # 用K线接口返回的name字段补全股票名称
         if not name:
