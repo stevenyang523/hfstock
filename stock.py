@@ -96,18 +96,21 @@ def get_stock_info(query):
             prev_pct = prev_info["pct"]
 
         now_dt = datetime.datetime.now()
-        if now_dt.strftime("%Y-%m-%d") != today_date:
+        now_time = now_dt.time()
+        open_time = datetime.time(9, 30)
+        close_time = datetime.time(15, 0)
+        if now_dt.strftime("%Y-%m-%d") != today_date or now_time < open_time:
             now_price_str = "未开盘"
             pct_today_str = "未开盘"
             closed = True
-        elif now_dt.hour < 15:
-            now_price_str = "未收盘"
-            pct_today_str = "未收盘"
-            closed = False
-        else:
+        elif now_time >= close_time:
             now_price_str = f"{today_close:.2f}"
             pct_today_str = f"{today_pct:+.2f}%"
             closed = True
+        else:
+            now_price_str = "未收盘"
+            pct_today_str = "未收盘"
+            closed = False
     except Exception as e:
         return {"error": f"行情数据获取失败（{e}）"}
 
