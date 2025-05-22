@@ -24,8 +24,12 @@ def get_stock_info(query):
     name = None
     market = None
     try:
-        url = f"https://searchapi.eastmoney.com/api/suggest/get?input={query}&type=14"
-        resp = requests.get(url, timeout=5)
+        params = {"input": query, "type": "14"}
+        resp = requests.get(
+            "https://searchapi.eastmoney.com/api/suggest/get",
+            params=params,
+            timeout=5,
+        )
         data = resp.json()
         data_table = data.get("QuotationCodeTable") or data.get("Data") or {}
         stock_list = data_table.get("Data") or data_table.get("data") or []
